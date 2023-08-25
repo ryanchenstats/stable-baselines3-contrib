@@ -8,7 +8,7 @@ from stable_baselines3.common.buffers import ReplayBuffer
 from stable_baselines3.common.off_policy_algorithm import OffPolicyAlgorithm
 from stable_baselines3.common.policies import BasePolicy
 from stable_baselines3.common.type_aliases import GymEnv, MaybeCallback, Schedule
-from stable_baselines3.common.utils import get_linear_fn, get_parameters_by_name, polyak_update
+from stable_baselines3.common.utils import get_linear_fn, get_pw_fn, get_parameters_by_name, polyak_update
 
 from sb3_contrib.common.utils import quantile_huber_loss
 from sb3_contrib.qrdqn.policies import CnnPolicy, MlpPolicy, MultiInputPolicy, QRDQNPolicy, QuantileNetwork
@@ -90,6 +90,7 @@ class QRDQN(OffPolicyAlgorithm):
         exploration_fraction: float = 0.005,
         exploration_initial_eps: float = 1.0,
         exploration_final_eps: float = 0.01,
+        pw_exploration: Optional[List[Tuple[int, int]]] = None,
         max_grad_norm: Optional[float] = None,
         stats_window_size: int = 100,
         tensorboard_log: Optional[str] = None,
@@ -128,6 +129,7 @@ class QRDQN(OffPolicyAlgorithm):
         self.exploration_initial_eps = exploration_initial_eps
         self.exploration_final_eps = exploration_final_eps
         self.exploration_fraction = exploration_fraction
+        self.peicewise_exploration = pw_exploration
         self.target_update_interval = target_update_interval
         # For updating the target network with multiple envs:
         self._n_calls = 0
@@ -149,9 +151,17 @@ class QRDQN(OffPolicyAlgorithm):
         # Copy running stats, see https://github.com/DLR-RM/stable-baselines3/issues/996
         self.batch_norm_stats = get_parameters_by_name(self.quantile_net, ["running_"])
         self.batch_norm_stats_target = get_parameters_by_name(self.quantile_net_target, ["running_"])
-        self.exploration_schedule = get_linear_fn(
-            self.exploration_initial_eps, self.exploration_final_eps, self.exploration_fraction
-        )
+        if not self.peicewise_exploration:
+            self.exploration_schedule = get_linear_fn(
+                self.exploration_initial_eps,
+                self.exploration_final_eps,
+                self.exploration_fraction,
+            )
+        else:
+            self.exploration_schedule = get_pw_fn(
+                step_values=self.peicewise_exploration,
+                end_fraction=self.exploration_fraction
+            )
         # Account for multiple environments
         # each call to step() corresponds to n_envs transitions
         if self.n_envs > 1:
